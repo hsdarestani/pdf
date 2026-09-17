@@ -27,6 +27,7 @@ jobs:
             apt-get update -y
             apt-get install -y git nginx poppler-utils nodejs npm certbot python3-certbot-nginx
 
+            git config --global --add safe.directory /opt/pdf-protect
             if [ -d /opt/pdf-protect/.git ]; then
               cd /opt/pdf-protect
               git fetch origin main
@@ -40,7 +41,7 @@ jobs:
             npm install --omit=dev
 
             mkdir -p /var/lib/pdf-protect
-            chown -R www-data:www-data /var/lib/pdf-protect /opt/pdf-protect
+            chown -R www-data:www-data /var/lib/pdf-protect
 
             cat >/etc/systemd/system/pdf-protect.service <<'EOF'
             [Unit]
