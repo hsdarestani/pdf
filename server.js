@@ -116,7 +116,6 @@ function verifyPdfMagic(file) {
   fs.closeSync(fd);
   return buf.toString() === '%PDF-';
 }
-
 function shell(title, body, extra = '') {
   return `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${e(title)}</title><link rel="stylesheet" href="/static/styles.css">${extra}</head><body>${body}</body></html>`;
 }
@@ -125,7 +124,6 @@ function adminNav(title) {
 }
 
 app.get('/', (_req, res) => res.redirect('/admin'));
-
 app.get('/health', (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
 app.get('/setup', (_req, res) => {
@@ -211,7 +209,9 @@ app.post('/admin/docs', adminOnly, upload.single('pdf'), async (req, res) => {
       devices: [],
       logs: []
     };
-    const db = loadDb(); db.documents.unshift(doc); saveDb(db);
+    const db = loadDb();
+    db.documents.unshift(doc);
+    saveDb(db);
     res.redirect(`/admin/docs/${id}?created=1`);
   } catch (err) {
     try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile); } catch {}
@@ -228,7 +228,7 @@ app.get('/admin/docs/:id', adminOnly, (req, res) => {
   res.send(shell(doc.title, `${adminNav('Dokument')}<main class="wrap"><div class="heading"><div><h1>${e(doc.title)}</h1><p class="muted">Erstellt ${fmtDate(doc.createdAt)}</p></div><a class="button" href="/admin">← Übersicht</a></div>
   <div class="grid2 maincols"><section class="card"><h2>Zugangslink</h2><div class="copyrow"><input id="shareUrl" readonly value="${e(shareUrl)}"><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('shareUrl').value);this.textContent='Kopiert'">Kopieren</button></div><p class="hint">PDF selbst ist nicht öffentlich verlinkt. Der Käufer sieht nur die gerenderten Seiten.</p>
   <dl><dt>Käufer</dt><dd>${e(doc.buyerName || '–')}</dd><dt>E-Mail</dt><dd>${e(doc.buyerEmail || '–')}</dd><dt>Öffnungen</dt><dd>${doc.openCount || 0}${doc.maxOpens > 0 ? ` / ${doc.maxOpens}` : ' / ∞'}</dd><dt>Geräte</dt><dd>${(doc.devices || []).length}${doc.maxDevices > 0 ? ` / ${doc.maxDevices}` : ' / ∞'}</dd><dt>Ablauf</dt><dd>${fmtDate(doc.expiresAt)}</dd><dt>Seiten</dt><dd>${doc.pages.length}</dd></dl>
-  <form method="post" action="/admin/docs/${doc.id}/toggle"><button class="${doc.active ? 'danger' : 'primary'}" type="submit">${doc.active ? 'Zugriff sperren' : 'Zugriff wieder freigeben'}</button></form></section>
+  <div class="doc-actions"><form method="post" action="/admin/docs/${doc.id}/toggle"><button class="${doc.active ? 'danger' : 'primary'}" type="submit">${doc.active ? 'Zugriff sperren' : 'Zugriff wieder freigeben'}</button></form><form method="post" action="/admin/docs/${doc.id}/delete" onsubmit="return confirm('PDF wirklich dauerhaft löschen? Diese Aktion kann nicht rückgängig gemacht werden.')"><button class="danger" type="submit">PDF löschen</button></form></div></section>
   <section class="card"><h2>Registrierte Geräte</h2><ul class="plain">${deviceRows || '<li class="muted">Noch kein Gerät.</li>'}</ul></section></div>
   <section class="card"><h2>Aktivitätsprotokoll</h2><div class="tablewrap"><table><thead><tr><th>Zeit</th><th>Ereignis</th><th>IP</th><th>Details</th></tr></thead><tbody>${logs || '<tr><td colspan="4" class="empty">Noch keine Aktivität.</td></tr>'}</tbody></table></div></section></main>`));
 });
@@ -240,6 +240,23 @@ app.post('/admin/docs/:id/toggle', adminOnly, (req, res) => {
   addLog(doc, req, doc.active ? 'ADMIN_FREIGEGEBEN' : 'ADMIN_GESPERRT');
   persistDoc(doc);
   res.redirect(`/admin/docs/${doc.id}`);
+});
+
+app.post('/admin/docs/:id/delete', adminOnly, (req, res) => {
+  const db = loadDb();
+  const index = db.documents.findIndex(d => d.id === req.params.id);
+  if (index < 0) return res.status(404).send('Nicht gefunden');
+  const doc = db.documents[index];
+  const dir = path.join(DOCS_DIR, doc.id);
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+    db.documents.splice(index, 1);
+    saveDb(db);
+    res.redirect('/admin');
+  } catch (err) {
+    console.error('PDF delete failed:', err);
+    res.status(500).send(shell('Löschen fehlgeschlagen', `${adminNav('Fehler')}<main class="wrap narrow"><section class="card"><h1>PDF konnte nicht gelöscht werden</h1><p>Bitte erneut versuchen.</p><a href="/admin/docs/${e(doc.id)}">Zurück</a></section></main>`));
+  }
 });
 
 app.get('/d/:token', (req, res) => {
@@ -260,19 +277,23 @@ app.post('/d/:token', async (req, res) => {
   const blocked = accessBlocked(doc);
   if (blocked) return res.status(403).send(shell('Zugriff nicht möglich', `<main class="center"><section class="card auth"><h1>Zugriff nicht möglich</h1><p>${e(blocked)}</p></section></main>`));
   if (!(await bcrypt.compare(String(req.body.password || ''), doc.passwordHash))) {
-    addLog(doc, req, 'PASSWORT_FEHLER'); persistDoc(doc);
+    addLog(doc, req, 'PASSWORT_FEHLER');
+    persistDoc(doc);
     return res.status(401).send(shell('Falsches Passwort', `<main class="center"><section class="card auth"><h1>Falsches Passwort</h1><a href="/d/${doc.token}">Erneut versuchen</a></section></main>`));
   }
   doc.devices = doc.devices || [];
   let device = doc.devices.find(d => d.id === deviceId);
   if (!device) {
     if (doc.maxDevices > 0 && doc.devices.length >= doc.maxDevices) {
-      addLog(doc, req, 'GERAET_ABGELEHNT', 'Gerätelimit erreicht'); persistDoc(doc);
+      addLog(doc, req, 'GERAET_ABGELEHNT', 'Gerätelimit erreicht');
+      persistDoc(doc);
       return res.status(403).send(shell('Gerätelimit', '<main class="center"><section class="card auth"><h1>Gerätelimit erreicht</h1><p>Dieses Dokument ist bereits auf der maximal erlaubten Anzahl an Geräten aktiviert.</p></section></main>'));
     }
     device = { id: deviceId, firstSeen: new Date().toISOString(), lastSeen: new Date().toISOString() };
     doc.devices.push(device);
-  } else device.lastSeen = new Date().toISOString();
+  } else {
+    device.lastSeen = new Date().toISOString();
+  }
   doc.openCount = (doc.openCount || 0) + 1;
   addLog(doc, req, 'GEÖFFNET', `Gerät ${deviceId.slice(0, 8)}…`);
   persistDoc(doc);
