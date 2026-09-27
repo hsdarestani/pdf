@@ -308,11 +308,9 @@ app.get('/d/:token/view', (req, res) => {
   if (!hasViewerAccess(req, doc)) return res.redirect(`/d/${doc.token}`);
   const blocked = !doc.active ? 'Dieser Zugriff wurde gesperrt.' : (isExpired(doc) ? 'Dieser Zugriff ist abgelaufen.' : null);
   if (blocked) return res.status(403).send(shell('Zugriff nicht möglich', `<main class="center"><section class="card auth"><h1>Zugriff nicht möglich</h1><p>${e(blocked)}</p></section></main>`));
-  const watermark = [doc.buyerName, doc.buyerEmail].filter(Boolean).join(' · ') || `Zugriff ${doc.id}`;
-  const watermarks = Array.from({ length: 28 }, () => `<span>${e(watermark)}</span>`).join('');
   const pages = doc.pages.map((p, i) => `<figure class="pdfpage"><img src="/d/${doc.token}/page/${i + 1}" alt="Seite ${i + 1}" draggable="false"><figcaption>${i + 1} / ${doc.pages.length}</figcaption></figure>`).join('');
   res.setHeader('Cache-Control', 'no-store');
-  res.send(shell(doc.title, `<header class="viewerbar"><strong>${e(doc.title)}</strong><span>${doc.pages.length} Seiten</span></header><main class="viewer" oncontextmenu="return false">${pages}<div class="watermark-grid" aria-hidden="true">${watermarks}</div></main><script>document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&['s','p'].includes(e.key.toLowerCase()))e.preventDefault()});</script>`));
+  res.send(shell(doc.title, `<header class="viewerbar"><strong>${e(doc.title)}</strong><span>${doc.pages.length} Seiten</span></header><main class="viewer" oncontextmenu="return false">${pages}</main><script>document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&['s','p'].includes(e.key.toLowerCase()))e.preventDefault()});</script>`));
 });
 
 app.get('/d/:token/page/:page', (req, res) => {
